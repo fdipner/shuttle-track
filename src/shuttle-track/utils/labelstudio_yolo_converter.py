@@ -74,7 +74,9 @@ def write_label_file(label_path: Path, video_name: str, frame_number: int, label
 
 
 def convert_labels(annotation_file: dict, dir: Path, validation_set: list[Path]):
-    video_path = Path(annotation_file["file_upload"])
+    video_rel_path = Path(annotation_file["data"]["video"])
+    video_path = Path(video_rel_path.name)
+
     tqdm.write(f"processing: {video_path}")
     subpath = "val" if video_path in validation_set else "train"
     img_path = dir / "images" / subpath
@@ -88,13 +90,17 @@ def convert_labels(annotation_file: dict, dir: Path, validation_set: list[Path])
     previous_label = Label(**labels[0])
     previous_label.convert_to_yolo()
 
-    fps = previous_label.frame / previous_label.time
-
     # fill up empty start frames
     for i in range(1, previous_label.frame):
         write_label_file(label_path, video_path.stem, i, "")
 
-    for label_dict in labels:
+    vid_fps, vid_n_frames = get_video_info(video_path)
+
+    assert (
+        vid_n_frames <= annotation["framesCount"]
+    )  # due to wired labelstudio bug that at times takes the last frame twice
+
+    for label_dict in labels[:vid_n_frames]:
         label = Label(**label_dict)
         label.convert_to_yolo()
 
@@ -115,7 +121,7 @@ def convert_labels(annotation_file: dict, dir: Path, validation_set: list[Path])
                 )
         previous_label = label
 
-    for i in range(previous_label.frame + 1, annotation["framesCount"] + 1):
+    for i in range(previous_label.frame + 1, vid_n_frames + 1):
         if not previous_label.enabled:
             write_label_file(label_path, video_path.stem, i, "")
         else:
@@ -124,21 +130,26 @@ def convert_labels(annotation_file: dict, dir: Path, validation_set: list[Path])
             )
 
     # video
+    label_fps = previous_label.frame / previous_label.time
+    assert np.allclose(
+        vid_fps, label_fps
+    ), f"framerates did not match {label_fps=}, {vid_fps=}"
+
     ffmpeg.input(str(video_path)).output(
         str(img_path / f"{video_path.stem}_%{FORMAT_STRING}.jpg"), **{"q:v": 1}
     ).run(quiet=True)
-    # TODO speedup
-    # video = cv2.VideoCapture(str(video_path))
-    # assert video.isOpened()
 
-    # for i in range(1, annotation["framesCount"] + 1):
-    #    video.set(cv2.CAP_PROP_POS_MSEC, (i - 1) / fps * 1000.0)
-    #    ret, frame = video.read()
-    #    if not ret:
-    #        break
-    #    cv2.imwrite(
-    #        str(img_path / f"{video_path.stem}_{format(i,FORMAT_STRING)}.jpg"), frame
-    #    )
+
+def get_video_info(path: Path) -> tuple[float, int]:
+    probe = ffmpeg.probe(path)
+    video_info = next(s for s in probe["streams"] if s["codec_type"] == "video")
+    fps_str = video_info["avg_frame_rate"]
+    num, den = map(int, fps_str.split("/"))
+    fps = num / den
+
+    num_frames = int(video_info["nb_frames"])
+
+    return fps, num_frames
 
 
 def create_folders(path: Path) -> None:
