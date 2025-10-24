@@ -1,5 +1,6 @@
 # ML
 data/
+runs/
 ./models/
 *.pt
 
