@@ -1,1 +1,2 @@
+import shuttletrack
 import pytest
