@@ -1,6 +1,7 @@
 # ML
 data/
-models/
+./models/
+*.pt
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
